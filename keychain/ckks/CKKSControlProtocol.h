@@ -26,7 +26,6 @@
 @protocol CKKSControlProtocol <NSObject>
 - (void)performanceCounters:(void(^)(NSDictionary <NSString *, NSNumber *> *))reply;
 - (void)rpcResetLocal:    (NSString*)viewName reply: (void(^)(NSError* result)) reply;
-- (void)rpcResetCloudKit: (NSString*)viewName reply: (void(^)(NSError* result)) reply __deprecated_msg("use rpcResetCloudKit:reason:reply");
 
 /**
  * Reset CloudKit zone with a caller provided reason, the reason will be logged in the operation group
@@ -35,11 +34,19 @@
 - (void)rpcResetCloudKit: (NSString*)viewName reason:(NSString *)reason reply: (void(^)(NSError* result)) reply;
 - (void)rpcResync:(NSString*)viewName reply: (void(^)(NSError* result)) reply;
 - (void)rpcResyncLocal:(NSString*)viewName reply:(void(^)(NSError* result))reply;
+/**
+ * Fetch status for the CKKS zones. If NULL is passed in a viewname, all zones are fetched.
+ */
 - (void)rpcStatus:(NSString*)viewName reply: (void(^)(NSArray<NSDictionary*>* result, NSError* error)) reply;
+/**
+ * Same as rpcStatus:reply: but avoid expensive operations (and thus don't report them). fastStatus doesn't include global status.
+ */
+- (void)rpcFastStatus:(NSString*)viewName reply: (void(^)(NSArray<NSDictionary*>* result, NSError* error)) reply;
 - (void)rpcFetchAndProcessChanges:(NSString*)viewName reply: (void(^)(NSError* result)) reply;
 - (void)rpcFetchAndProcessClassAChanges:(NSString*)viewName reply: (void(^)(NSError* result)) reply;
 - (void)rpcPushOutgoingChanges:(NSString*)viewName reply: (void(^)(NSError* result)) reply;
 - (void)rpcGetCKDeviceIDWithReply: (void (^)(NSString* ckdeviceID))reply;
+- (void)rpcCKMetric:(NSString *)eventName attributes:(NSDictionary *)attributes reply:(void(^)(NSError* result)) reply;
 @end
 
 NSXPCInterface* CKKSSetupControlProtocol(NSXPCInterface* interface);

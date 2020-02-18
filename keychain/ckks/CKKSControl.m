@@ -35,6 +35,7 @@
 #include <security_utilities/debugging.h>
 
 @interface CKKSControl ()
+@property (readwrite,assign) BOOL synchronous;
 @property xpc_endpoint_t endpoint;
 @property NSXPCConnection *connection;
 @end
@@ -48,8 +49,17 @@
     return self;
 }
 
+- (id<CKKSControlProtocol>)objectProxyWithErrorHandler:(void(^)(NSError * _Nonnull error))failureHandler
+{
+    if (self.synchronous) {
+        return [self.connection synchronousRemoteObjectProxyWithErrorHandler:failureHandler];
+    } else {
+        return [self.connection remoteObjectProxyWithErrorHandler:failureHandler];
+    }
+}
+
 - (void)rpcStatus:(NSString*)viewName reply:(void(^)(NSArray<NSDictionary*>* result, NSError* error)) reply {
-    [[self.connection remoteObjectProxyWithErrorHandler: ^(NSError* error) {
+    [[self objectProxyWithErrorHandler: ^(NSError* error) {
         reply(nil, error);
 
     }] rpcStatus:viewName reply:^(NSArray<NSDictionary*>* result, NSError* error){
@@ -57,24 +67,26 @@
     }];
 }
 
+- (void)rpcFastStatus:(NSString*)viewName reply:(void(^)(NSArray<NSDictionary*>* result, NSError* error)) reply {
+    [[self objectProxyWithErrorHandler: ^(NSError* error) {
+        reply(nil, error);
+
+    }] rpcFastStatus:viewName reply:^(NSArray<NSDictionary*>* result, NSError* error){
+        reply(result, error);
+    }];
+}
+
+
 - (void)rpcResetLocal:(NSString*)viewName reply:(void(^)(NSError* error))reply {
-    [[self.connection remoteObjectProxyWithErrorHandler:^(NSError* error) {
+    [[self objectProxyWithErrorHandler:^(NSError* error) {
         reply(error);
     }] rpcResetLocal:viewName reply:^(NSError* error){
         reply(error);
     }];
 }
 
-- (void)rpcResetCloudKit:(NSString*)viewName reply:(void(^)(NSError* error))reply {
-    [[self.connection remoteObjectProxyWithErrorHandler:^(NSError* error) {
-        reply(error);
-    }] rpcResetCloudKit:viewName reason:[NSString stringWithFormat:@"%s", getprogname()] reply:^(NSError* error){
-        reply(error);
-    }];
-}
-
 - (void)rpcResetCloudKit:(NSString*)viewName reason:(NSString *)reason reply:(void(^)(NSError* error))reply {
-    [[self.connection remoteObjectProxyWithErrorHandler:^(NSError* error) {
+    [[self objectProxyWithErrorHandler:^(NSError* error) {
         reply(error);
     }] rpcResetCloudKit:viewName reason:reason reply:^(NSError* error){
         reply(error);
@@ -83,36 +95,44 @@
 
 
 - (void)rpcResync:(NSString*)viewName reply:(void(^)(NSError* error))reply {
-    [[self.connection remoteObjectProxyWithErrorHandler:^(NSError* error) {
+    [[self objectProxyWithErrorHandler:^(NSError* error) {
         reply(error);
     }] rpcResync:viewName reply:^(NSError* error){
         reply(error);
     }];
 }
 - (void)rpcFetchAndProcessChanges:(NSString*)viewName reply:(void(^)(NSError* error))reply {
-    [[self.connection remoteObjectProxyWithErrorHandler:^(NSError* error) {
+    [[self objectProxyWithErrorHandler:^(NSError* error) {
         reply(error);
     }] rpcFetchAndProcessChanges:viewName reply:^(NSError* error){
         reply(error);
     }];
 }
 - (void)rpcFetchAndProcessClassAChanges:(NSString*)viewName reply:(void(^)(NSError* error))reply {
-    [[self.connection remoteObjectProxyWithErrorHandler:^(NSError* error) {
+    [[self objectProxyWithErrorHandler:^(NSError* error) {
         reply(error);
     }] rpcFetchAndProcessClassAChanges:viewName reply:^(NSError* error){
         reply(error);
     }];
 }
 - (void)rpcPushOutgoingChanges:(NSString*)viewName reply:(void(^)(NSError* error))reply {
-    [[self.connection remoteObjectProxyWithErrorHandler:^(NSError* error) {
+    [[self objectProxyWithErrorHandler:^(NSError* error) {
         reply(error);
     }] rpcPushOutgoingChanges:viewName reply:^(NSError* error){
         reply(error);
     }];
 }
 
+- (void)rpcCKMetric:(NSString *)eventName attributes:(NSDictionary *)attributes reply:(void(^)(NSError* error))reply {
+    [[self objectProxyWithErrorHandler:^(NSError* error) {
+        reply(error);
+    }] rpcCKMetric:eventName attributes:attributes reply:^(NSError* error){
+        reply(error);
+    }];
+}
+
 - (void)rpcPerformanceCounters:(void(^)(NSDictionary <NSString *,NSNumber *> *,NSError*))reply {
-    [[self.connection remoteObjectProxyWithErrorHandler: ^(NSError* error) {
+    [[self objectProxyWithErrorHandler: ^(NSError* error) {
         reply(nil, error);
     }] performanceCounters:^(NSDictionary <NSString *, NSNumber *> *counters){
         reply(counters, nil);
@@ -120,7 +140,7 @@
 }
 
 - (void)rpcGetCKDeviceIDWithReply:(void (^)(NSString *))reply {
-    [[self.connection remoteObjectProxyWithErrorHandler:^(NSError * _Nonnull error) {
+    [[self objectProxyWithErrorHandler:^(NSError * _Nonnull error) {
         reply(nil);
     }] rpcGetCKDeviceIDWithReply:^(NSString *ckdeviceID) {
         reply(ckdeviceID);
@@ -128,11 +148,9 @@
 }
 
 - (void)rpcTLKMissing:(NSString*)viewName reply:(void(^)(bool missing))reply {
-    [self rpcStatus:viewName reply:^(NSArray<NSDictionary*>* results, NSError* blockError) {
+    [self rpcFastStatus:viewName reply:^(NSArray<NSDictionary*>* results, NSError* blockError) {
         bool missing = false;
 
-        // Until PCS fixes [<rdar://problem/35103941> PCS: Remove PCS's use of CKKSControlProtocol], we can't add things to the protocol
-        // Use this hack
         for(NSDictionary* result in results) {
             NSString* name = result[@"view"];
             NSString* keystate = result[@"keystate"];
@@ -152,14 +170,13 @@
 }
 
 - (void)rpcKnownBadState:(NSString* _Nullable)viewName reply:(void (^)(CKKSKnownBadState))reply {
-    [self rpcStatus:viewName reply:^(NSArray<NSDictionary*>* results, NSError* blockError) {
+    [self rpcFastStatus:viewName reply:^(NSArray<NSDictionary*>* results, NSError* blockError) {
         bool tlkMissing = false;
         bool waitForUnlock = false;
+        bool waitForOctagon = false;
 
         CKKSKnownBadState response = CKKSKnownStatePossiblyGood;
 
-        // We can now change this hack, but this change needs to be addition-only: <rdar://problem/36356681> CKKS: remove "global" hack from rpcStatus
-        // Use this hack
         for(NSDictionary* result in results) {
             NSString* name = result[@"view"];
             NSString* keystate = result[@"keystate"];
@@ -175,17 +192,27 @@
             if ([keystate isEqualToString:@"waitforunlock"]) {
                 waitForUnlock = true;
             }
+
+            if([keystate isEqualToString:@"waitfortlkcreation"] ||
+               [keystate isEqualToString:@"waitfortlkupload"]) {
+                waitForOctagon = true;
+            }
         }
 
         response = (tlkMissing ? CKKSKnownStateTLKsMissing :
                    (waitForUnlock ? CKKSKnownStateWaitForUnlock :
-                    CKKSKnownStatePossiblyGood));
+                    (waitForOctagon ? CKKSKnownStateWaitForOctagon :
+                    CKKSKnownStatePossiblyGood)));
 
         reply(response);
     }];
 }
 
 + (CKKSControl*)controlObject:(NSError* __autoreleasing *)error {
+    return [CKKSControl CKKSControlObject:NO error:error];
+}
+
++ (CKKSControl*)CKKSControlObject:(BOOL)synchronous error:(NSError* __autoreleasing *)error {
 
     NSXPCConnection* connection = [[NSXPCConnection alloc] initWithMachServiceName:@(kSecuritydCKKSServiceName) options:0];
 
@@ -201,6 +228,7 @@
     [connection resume];
 
     CKKSControl* c = [[CKKSControl alloc] initWithConnection:connection];
+    c.synchronous = synchronous;
     return c;
 }
 

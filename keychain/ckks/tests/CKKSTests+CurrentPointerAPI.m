@@ -390,7 +390,8 @@
 
     // Entirely signed out of iCloud. all current record writes should fail.
     self.accountStatus = CKAccountStatusNoAccount;
-    self.circleStatus = [[SOSAccountStatus alloc] init:kSOSCCNotInCircle error:nil];
+
+    self.mockSOSAdapter.circleStatus = kSOSCCNotInCircle;
     [self.accountStateTracker notifyCircleStatusChangeAndWaitForSignal];
 
     self.silentFetchesAllowed = false;
@@ -893,7 +894,7 @@
                                               XCTAssertNotNil(error, "Error setting current item when the write fails");
                                               [setCurrentExpectation fulfill];
                                           });
-    OCMVerifyAllWithDelay(self.mockDatabase, 20);
+    OCMVerifyAllWithDelay(self.mockDatabase, 40);
 
     [self waitForExpectationsWithTimeout:8.0 handler:nil];
 

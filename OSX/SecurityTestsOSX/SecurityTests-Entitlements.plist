@@ -10,7 +10,11 @@
 	<true/>
 	<key>com.apple.keystore.access-keychain-keys</key>
 	<true/>
+	<key>com.apple.keystore.sik.access</key>
+	<true/>
 	<key>com.apple.keystore.device</key>
+	<true/>
+	<key>com.apple.private.applecredentialmanager.allow</key>
 	<true/>
 	<key>restore-keychain</key>
 	<true/>
@@ -23,6 +27,8 @@
 	<key>com.apple.springboard.wipedevice</key>
 	<true/>
 	<key>application-identifier</key>
+	<string>com.apple.security.regressions</string>
+	<key>com.apple.application-identifier</key>
 	<string>com.apple.security.regressions</string>
 	<key>com.apple.private.uninstall.deletion</key>
 	<true/>

@@ -51,9 +51,7 @@ CFTypeID SecCodeGetTypeID(void);
 	Obtains a SecCode object for the code making the call.
 	The calling code is determined in a way that is subject to modification over
 	time, but obeys the following rules. If it is a UNIX process, its process id (pid)
-	is always used. If it is an active code host that has a dedicated guest, such a guest
-	is always preferred. If it is a host that has called SecHostSelectGuest, such selection
-	is considered until revoked.
+	is always used.
 
 	@param flags Optional flags. Pass kSecCSDefaultFlags for standard behavior.
 	@param self Upon successful return, contains a SecCodeRef representing the caller.
@@ -427,7 +425,8 @@ CF_ENUM(uint32_t) {
 	kSecCSRequirementInformation = 1 << 2,
 	kSecCSDynamicInformation = 1 << 3,
 	kSecCSContentInformation = 1 << 4,
-    kSecCSSkipResourceDirectory = 1 << 5
+    kSecCSSkipResourceDirectory = 1 << 5,
+    kSecCSCalculateCMSDigest = 1 << 6,
 };
 													/* flag required to get this value */
 extern const CFStringRef kSecCodeInfoCertificates;	/* Signing */

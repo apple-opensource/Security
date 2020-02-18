@@ -94,6 +94,10 @@ CFStringRef SOSCCGetOperationDescription(enum SecXPCOperation op)
             return CFSTR("OTAGetEscrowCertificates");
         case kSecXPCOpOTAPKIGetNewAsset:
             return CFSTR("OTAPKIGetNewAsset");
+        case kSecXPCOpOTASecExperimentGetNewAsset:
+            return CFSTR("OTASecExperimentGetNewAsset");
+        case kSecXPCOpOTASecExperimentGetAsset:
+            return CFSTR("OTASecExperimentGetAsset");
         case kSecXPCOpAcceptApplicants:
             return CFSTR("AcceptApplicants");
         case kSecXPCOpApplyToARing:
@@ -132,10 +136,6 @@ CFStringRef SOSCCGetOperationDescription(enum SecXPCOperation op)
             return CFSTR("GetAllTheRings");
         case kSecXPCOpGetLastDepartureReason:
             return CFSTR("GetLastDepartureReason");
-        case kSecXPCOpSyncWithKVSPeer:
-            return CFSTR("SyncKVSPeer");
-        case kSecXPCOpClearKVSPeerMessage:
-            return CFSTR("kSecXPCOpClearKVSPeerMessage");
         case kSecXPCOpLoggedOutOfAccount:
             return CFSTR("LoggedOutOfAccount");
         case kSecXPCOpProcessSyncWithAllPeers:
@@ -232,6 +232,8 @@ CFStringRef SOSCCGetOperationDescription(enum SecXPCOperation op)
             return CFSTR("keychain_sync_update_message");
         case sec_ota_pki_trust_store_version_id:
             return CFSTR("ota_pki_trust_store_version");
+        case sec_ota_pki_asset_version_id:
+            return CFSTR("ota_pki_asset_version");
         case sec_otr_session_create_remote_id: 
             return CFSTR("otr_session_create_remote");
         case sec_otr_session_process_packet_remote_id: 
@@ -300,8 +302,16 @@ CFStringRef SOSCCGetOperationDescription(enum SecXPCOperation op)
             return CFSTR("KeybagDelete");
         case kSecXPCOpKeychainControlEndpoint:
             return CFSTR("KeychainControlEndpoint");
-        case kSecXPCOpTLSAnaltyicsReport:
-            return CFSTR("TLSAnalyticsReport");
+        case kSecXPCOpNetworkingAnalyticsReport:
+            return CFSTR("NetworkingAnalyticsReport");
+        case kSecXPCOpSetCTExceptions:
+            return CFSTR("SetCTExceptions");
+        case kSecXPCOpCopyCTExceptions:
+            return CFSTR("CopyCTExceptions");
+        case sec_trust_get_exception_reset_count_id:
+            return CFSTR("GetExceptionResetCount");
+        case sec_trust_increment_exception_reset_count_id:
+            return CFSTR("IncrementExceptionResetCount");
         default:
             return CFSTR("Unknown xpc operation");
     }

@@ -35,14 +35,15 @@
 #include <inttypes.h>
 #include <syslog.h>
 #include <utilities/SecCFWrappers.h>
+#include <xpc/private.h>
 
 #include <sys/sysctl.h>
 
 #if TARGET_OS_OSX
 /* These won't exist until we unify codesigning */
-#include "SecCode.h"
-#include "SecCodePriv.h"
-#include "SecRequirement.h"
+#include <Security/SecCode.h>
+#include <Security/SecCodePriv.h>
+#include <Security/SecRequirement.h>
 #endif /* TARGET_OS_OSX */
 
 struct __SecTask {
@@ -132,6 +133,21 @@ SecTaskRef SecTaskCreateWithAuditToken(CFAllocatorRef allocator, audit_token_t t
     return task;
 }
 
+_Nullable SecTaskRef
+SecTaskCreateWithXPCMessage(xpc_object_t _Nonnull message)
+{
+    audit_token_t token;
+
+    if (message == NULL || xpc_get_type(message) != XPC_TYPE_DICTIONARY) {
+        return NULL;
+    }
+    xpc_dictionary_get_audit_token(message, &token);
+
+    return SecTaskCreateWithAuditToken(NULL, token);
+}
+
+
+
 struct csheader {
         uint32_t magic;
         uint32_t length;
@@ -150,8 +166,8 @@ csops_task(SecTaskRef task, int ops, void *blob, size_t size)
 	return rc;
 }
 
-CFStringRef
-SecTaskCopySigningIdentifier(SecTaskRef task, CFErrorRef *error)
+static CFStringRef
+SecTaskCopyIdentifier(SecTaskRef task, int op, CFErrorRef *error)
 {
         CFStringRef signingId = NULL;
         char *data = NULL;
@@ -159,7 +175,7 @@ SecTaskCopySigningIdentifier(SecTaskRef task, CFErrorRef *error)
         uint32_t bufferlen;
         int ret;
 
-        ret = csops_task(task, CS_OPS_IDENTITY, &header, sizeof(header));
+        ret = csops_task(task, op, &header, sizeof(header));
         if (ret != -1 || errno != ERANGE)
                 return NULL;
 
@@ -174,7 +190,7 @@ SecTaskCopySigningIdentifier(SecTaskRef task, CFErrorRef *error)
                 ret = ENOMEM;
                 goto out;
         }
-        ret = csops_task(task, CS_OPS_IDENTITY, data, bufferlen);
+        ret = csops_task(task, op, data, bufferlen);
         if (ret) {
                 ret = errno;
                 goto out;
@@ -190,6 +206,18 @@ SecTaskCopySigningIdentifier(SecTaskRef task, CFErrorRef *error)
                 *error = CFErrorCreate(NULL, kCFErrorDomainPOSIX, ret, NULL);
 
         return signingId;
+}
+
+CFStringRef
+SecTaskCopySigningIdentifier(SecTaskRef task, CFErrorRef *error)
+{
+    return SecTaskCopyIdentifier(task, CS_OPS_IDENTITY, error);
+}
+
+CFStringRef
+SecTaskCopyTeamIdentifier(SecTaskRef task, CFErrorRef *error)
+{
+    return SecTaskCopyIdentifier(task, CS_OPS_TEAMID, error);
 }
 
 uint32_t
@@ -342,7 +370,7 @@ out:
     return values;
 }
 
-#if TARGET_OS_OSX
+#if SEC_OS_OSX
 /*
  * Determine if the given task meets a specified requirement.
  */
@@ -373,7 +401,7 @@ SecTaskValidateForRequirement(SecTaskRef task, CFStringRef requirement)
 
     return status;
 }
-#endif /* TARGET_OS_OSX */
+#endif /* SEC_OS_OSX */
 
 Boolean SecTaskEntitlementsValidated(SecTaskRef task) {
     // TODO: Cache the result

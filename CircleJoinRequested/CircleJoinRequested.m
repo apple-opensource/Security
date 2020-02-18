@@ -36,14 +36,15 @@
 #import <MobileCoreServices/MobileCoreServices.h>
 #import <MobileCoreServices/LSApplicationWorkspace.h>
 #import <MobileGestalt.h>
+#import <os/transaction_private.h>
 #import <ProtectedCloudStorage/CloudIdentity.h>
 #import <Security/SecFrameworkStrings.h>
 #import <SpringBoardServices/SBSCFUserNotificationKeys.h>
 #include <dispatch/dispatch.h>
-#include "SecureObjectSync/SOSCloudCircle.h"
-#include "SecureObjectSync/SOSCloudCircleInternal.h"
-#include "SecureObjectSync/SOSPeerInfo.h"
-#include "SecureObjectSync/SOSInternal.h"
+#include "keychain/SecureObjectSync/SOSCloudCircle.h"
+#include "keychain/SecureObjectSync/SOSCloudCircleInternal.h"
+#include "keychain/SecureObjectSync/SOSPeerInfo.h"
+#include "keychain/SecureObjectSync/SOSInternal.h"
 #include <notify.h>
 #include <sysexits.h>
 #import "Applicant.h"
@@ -67,7 +68,7 @@
 #import <CoreCDP/CDPAccount.h>
 
 // As long as we are logging the failure use exit code of zero to make launchd happy
-#define EXIT_LOGGED_FAILURE(code)  xpc_transaction_end();  exit(0)
+#define EXIT_LOGGED_FAILURE(code) exit(0)
 
 const char *kLaunchLaterXPCName = "com.apple.security.CircleJoinRequestedTick";
 CFRunLoopSourceRef currentAlertSource = NULL;
@@ -89,10 +90,14 @@ NSString *rejoinICDPUrl     = @"prefs:root=APPLE_ACCOUNT&aaaction=CDP&command=re
 
 BOOL processRequests(CFErrorRef *error);
 
-static bool PSKeychainSyncPrimaryAcccountExists(void)
+static BOOL isErrorFromXPC(CFErrorRef error)
 {
-    ACAccountStore *accountStore = [[ACAccountStore alloc] init];
-    return [accountStore aa_primaryAppleAccount] != NULL;
+    // Error due to XPC failure does not provide information about the circle.
+    if (error && (CFEqual(sSecXPCErrorDomain, CFErrorGetDomain(error)))) {
+        secnotice("cjr", "XPC error while checking circle status: \"%@\", not processing events", error);
+        return YES;
+    }
+    return NO;
 }
 
 static void PSKeychainSyncIsUsingICDP(void)
@@ -122,15 +127,16 @@ static void keybagDidUnlock()
     secnotice("cjr", "keybagDidUnlock");
     
     CFErrorRef error = NULL;
-    
+
     if(processApplicantsAfterUnlock){
         processRequests(&error);
         processApplicantsAfterUnlock = false;
     }
 
     SOSCCStatus circleStatus = SOSCCThisDeviceIsInCircle(&error);
-    if (circleStatus == kSOSCCError && error && CFEqual(sSecXPCErrorDomain, CFErrorGetDomain(error))) {
-        secnotice("cjr", "unable to determine circle status due to xpc failure: %@", error);
+    BOOL xpcError = isErrorFromXPC(error);
+    if(xpcError && circleStatus == kSOSCCError) {
+        secnotice("cjr", "returning early due to error returned from securityd: %@", error);
         return;
     }
     else if (_isAccountICDP && (circleStatus == kSOSCCError || circleStatus == kSOSCCCircleAbsent || circleStatus == kSOSCCNotInCircle) && _hasPostedFollowupAndStillInError == false) {
@@ -752,30 +758,30 @@ static void postKickedOutAlert(enum DepartureReason reason)
     debugState = @"pKOA Z";
 }
 
-
 static bool processEvents()
 {
 	debugState = @"processEvents A";
 
-	CFErrorRef			error			 = NULL;
-	CFErrorRef			departError		 = NULL;
-	SOSCCStatus			circleStatus	 = SOSCCThisDeviceIsInCircleNonCached(&error);
+    CFErrorRef			error			 = NULL;
+    CFErrorRef			departError		 = NULL;
+    SOSCCStatus			circleStatus	 = SOSCCThisDeviceIsInCircleNonCached(&error);
     enum DepartureReason departureReason = SOSCCGetLastDepartureReason(&departError);
 
-    // Error due to XPC failure does not provide information about the circle.
-    if (circleStatus == kSOSCCError && error && (CFEqual(sSecXPCErrorDomain, CFErrorGetDomain(error)))) {
-        secnotice("cjr", "XPC error while checking circle status: \"%@\", not processing events", error);
+    BOOL abortFromError = isErrorFromXPC(error);
+    if(abortFromError && circleStatus == kSOSCCError) {
+        secnotice("cjr", "returning from processEvents due to error returned from securityd: %@", error);
         return true;
-    } else if (departureReason == kSOSDepartureReasonError && departError && (CFEqual(sSecXPCErrorDomain, CFErrorGetDomain(departError)))) {
+    }
+    if (departureReason == kSOSDepartureReasonError && departError && (CFEqual(sSecXPCErrorDomain, CFErrorGetDomain(departError)))) {
         secnotice("cjr", "XPC error while checking last departure reason: \"%@\", not processing events", departError);
         return true;
     }
+    
+    NSDate				*nowish			 = [NSDate date];
+    PersistentState 	*state     		 = [PersistentState loadFromStorage];
+    secnotice("cjr", "CircleStatus %d -> %d{%d} (s=%p)", state.lastCircleStatus, circleStatus, departureReason, state);
 
-	NSDate				*nowish			 = [NSDate date];
-	PersistentState 	*state     		 = [PersistentState loadFromStorage];
-	secnotice("cjr", "CircleStatus %d -> %d{%d} (s=%p)", state.lastCircleStatus, circleStatus, departureReason, state);
-
-	// Pending application reminder
+    // Pending application reminder
 	NSTimeInterval timeUntilApplicationAlert = [state.pendingApplicationReminder timeIntervalSinceDate:nowish];
 	secnotice("cjr", "Time until pendingApplicationReminder (%@) %f", [state.pendingApplicationReminder debugDescription], timeUntilApplicationAlert);
 	if (circleStatus == kSOSCCRequestPending) {
@@ -792,13 +798,9 @@ static bool processEvents()
     // Refresh because sometimes we're fixed elsewhere before we get here.
     CFReleaseNull(error);
     circleStatus = SOSCCThisDeviceIsInCircleNonCached(&error);
-
-    /*
-     * Double check that the account still exists before doing anything rash (like posting a CFU or throw up a dialog)
-     */
-
-    if (!PSKeychainSyncPrimaryAcccountExists()) {
-        secnotice("cjr", "no primary account, bailing");
+    abortFromError = isErrorFromXPC(error);
+    if(abortFromError && circleStatus == kSOSCCError) {
+        secnotice("cjr", "returning from processEvents due to error returned from securityd: %@", error);
         return true;
     }
 
@@ -807,20 +809,33 @@ static bool processEvents()
             if(circleStatus == kSOSCCError) {
                 secnotice("cjr", "error from SOSCCThisDeviceIsInCircle: %@", error);
             }
-            secnotice("cjr", "iCDP: We need to get back into the circle");
-            doOnceInMain(^{
-                NSError *localError = nil;
-                CDPFollowUpController *cdpd = [[CDPFollowUpController alloc] init];
-                CDPFollowUpContext *context = [CDPFollowUpContext contextForStateRepair];
-                [cdpd postFollowUpWithContext:context error:&localError ];
-                if(localError){
-                    secnotice("cjr", "request to CoreCDP to follow up failed: %@", localError);
-                }
-                else{
-                    secnotice("cjr", "CoreCDP handling follow up");
-                    _hasPostedFollowupAndStillInError = true;
-                }
-            });
+            
+            /*
+                You would think we could count on not being iCDP if the account was signed out.  Evidently that's wrong.
+                So we'll go based on the artifact that when the account object is reset (like by signing out) the
+                departureReason will be set to kSOSDepartureReasonError.  So we won't push to get back into a circle if that's
+                the current reason.  I've checked code for other ways we could be out.  If we boot and can't load the account
+                we'll end up with kSOSDepartureReasonError.  Then too if we end up in kSOSDepartureReasonError and reboot we end up
+                in the same place.  Leave it to cdpd to decide whether the user needs to sign in to an account.
+             */
+            if(departureReason != kSOSDepartureReasonError) {
+                secnotice("cjr", "iCDP: We need to get back into the circle");
+                doOnceInMain(^{
+                    NSError *localError = nil;
+                    CDPFollowUpController *cdpd = [[CDPFollowUpController alloc] init];
+                    CDPFollowUpContext *context = [CDPFollowUpContext contextForStateRepair];
+                    [cdpd postFollowUpWithContext:context error:&localError ];
+                    if(localError){
+                        secnotice("cjr", "request to CoreCDP to follow up failed: %@", localError);
+                    }
+                    else{
+                        secnotice("cjr", "CoreCDP handling follow up");
+                        _hasPostedFollowupAndStillInError = true;
+                    }
+                });
+            } else {
+                secnotice("cjr", "iCDP: We appear to not be associated with an iCloud account");
+            }
             state.lastCircleStatus = circleStatus;
             _executeProcessEventsOnce = true;
             return false;
@@ -921,16 +936,22 @@ static bool processEvents()
 			notify_register_dispatch(kSOSCCCircleChangedNotification, &notifyToken, dispatch_get_main_queue(), ^(int token) {
 				if (postedAlert != currentAlert) {
 					secnotice("cjr", "-- CC after original alert gone (currentAlertIsForApplicants %d, pA %p, cA %p -- %@)",
-						  currentAlertIsForApplicants, postedAlert, currentAlert, currentAlert);
-					notify_cancel(token);
-				} else {
+                              currentAlertIsForApplicants, postedAlert, currentAlert, currentAlert);
+                    notify_cancel(token);
+                } else {
                     CFErrorRef localError = NULL;
-					SOSCCStatus newCircleStatus = SOSCCThisDeviceIsInCircle(&localError);
-					if (newCircleStatus != kSOSCCRequestPending) {
-						if (newCircleStatus == kSOSCCError)
-							secnotice("cjr", "No longer pending (nCS=%d, alert=%@) error: %@", newCircleStatus, currentAlert, localError);
-						else
-							secnotice("cjr", "No longer pending (nCS=%d, alert=%@)", newCircleStatus, currentAlert);
+                    SOSCCStatus newCircleStatus = SOSCCThisDeviceIsInCircle(&localError);
+                    BOOL xpcError = isErrorFromXPC(localError);
+                    if(xpcError && newCircleStatus == kSOSCCError) {
+                        secnotice("cjr", "returning from processEvents due to error returned from securityd: %@", localError);
+                        return;
+                    }
+                    
+                    if (newCircleStatus != kSOSCCRequestPending) {
+                        if (newCircleStatus == kSOSCCError)
+                            secnotice("cjr", "No longer pending (nCS=%d, alert=%@) error: %@", newCircleStatus, currentAlert, localError);
+                        else
+                            secnotice("cjr", "No longer pending (nCS=%d, alert=%@)", newCircleStatus, currentAlert);
 						cancelCurrentAlert(true);
 					} else {
 						secnotice("cjr", "Still pending...");
@@ -1011,10 +1032,16 @@ static bool processEvents()
 		if (newIds.count == 0) {
 			secnotice("cjr", "All applicants were handled elsewhere");
 			cancelCurrentAlert(true);
-		}
-		SOSCCStatus currentCircleStatus = SOSCCThisDeviceIsInCircle(&circleStatusError);
-		if (kSOSCCInCircle != currentCircleStatus) {
-			secnotice("cjr", "Left circle (%d), not handling remaining %lu applicants", currentCircleStatus, (unsigned long)newIds.count);
+        }
+        CFErrorRef circleError = NULL;
+        SOSCCStatus currentCircleStatus = SOSCCThisDeviceIsInCircle(&circleError);
+        BOOL xpcError = isErrorFromXPC(circleError);
+        if(xpcError && currentCircleStatus == kSOSCCError) {
+            secnotice("cjr", "returning early due to error returned from securityd: %@", circleError);
+            return;
+        }
+        if (kSOSCCInCircle != currentCircleStatus) {
+            secnotice("cjr", "Left circle (%d), not handling remaining %lu applicants", currentCircleStatus, (unsigned long)newIds.count);
 			cancelCurrentAlert(true);
 		}
 		if (needsUpdate) {
@@ -1049,9 +1076,8 @@ static bool processEvents()
 
 
 int main (int argc, const char * argv[]) {
-    
-	xpc_transaction_begin();
-    
+    os_transaction_t txion = os_transaction_create("com.apple.security.circle-join-requested");
+
 	@autoreleasepool {
 
         // NOTE: DISPATCH_QUEUE_PRIORITY_LOW will not actually manage to drain events in a lot of cases (like circleStatus != kSOSCCInCircle)
@@ -1090,6 +1116,7 @@ int main (int argc, const char * argv[]) {
 	}
     
 	secnotice("cjr", "Done");
-	xpc_transaction_end();
+    (void) txion; // But we really do want this around, compiler...
+    txion = nil;
 	return(0);
 }

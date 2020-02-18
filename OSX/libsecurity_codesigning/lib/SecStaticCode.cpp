@@ -117,12 +117,14 @@ OSStatus SecStaticCodeCheckValidityWithErrors(SecStaticCodeRef staticCodeRef, Se
 		| kSecCSNoNetworkAccess
 		| kSecCSCheckNestedCode
 		| kSecCSStrictValidate
+		| kSecCSStrictValidateStructure
 		| kSecCSRestrictSidebandData
 		| kSecCSCheckGatekeeperArchitectures
 		| kSecCSRestrictSymlinks
 		| kSecCSRestrictToAppLike
         | kSecCSUseSoftwareSigningCert
 	    | kSecCSValidatePEH
+		| kSecCSSingleThreaded
 	);
 
 	if (errors)

@@ -423,7 +423,7 @@ SecCmsSignedDataEncodeAfterData(SecCmsSignedDataRef sigd)
     SecCmsContentInfoRef cinfo;
     SECOidTag digestalgtag;
     OSStatus ret = SECFailure;
-    OSStatus rv;
+    OSStatus rv = errSecSuccess;
     CSSM_DATA_PTR contentType;
     int certcount;
     int i, ci, n, rci, si;
@@ -749,8 +749,11 @@ SecCmsSignedDataVerifySignerInfo(SecCmsSignedDataRef sigd, int i,
     CSSM_DATA_PTR contentType, digest;
     OSStatus status, status2;
 
-    cinfo = &(sigd->contentInfo);
+    if (sigd == NULL || sigd->signerInfos == NULL || i >= SecCmsSignedDataSignerInfoCount(sigd)) {
+        return errSecParam;
+    }
 
+    cinfo = &(sigd->contentInfo);
     signerinfo = sigd->signerInfos[i];
 
     /* Signature or digest level verificationStatus errors should supercede
@@ -759,19 +762,19 @@ SecCmsSignedDataVerifySignerInfo(SecCmsSignedDataRef sigd, int i,
     /* Find digest and contentType for signerinfo */
     algiddata = SecCmsSignerInfoGetDigestAlg(signerinfo);
     if (algiddata == NULL) {
-        return errSecInternalError; // shouldn't have happened, this is likely due to corrupted data
+        return errSecInvalidDigestAlgorithm;
     }
     
     digest = SecCmsSignedDataGetDigestByAlgTag(sigd, algiddata->offset);
-	if(digest == NULL) {
-		/* 
-		 * No digests; this probably had detached content the caller has to 
-		 * deal with. 
-		 * FIXME: need some error return for this (as well as many 
-		 * other places in this library).
-		 */
-		return errSecDataNotAvailable;
-	}
+    if(digest == NULL) {
+        /*
+         * No digests; this probably had detached content the caller has to
+         * deal with.
+         * FIXME: need some error return for this (as well as many
+         * other places in this library).
+         */
+        return errSecDataNotAvailable;
+    }
     contentType = SecCmsContentInfoGetContentTypeOID(cinfo);
 
     /* verify signature */
@@ -870,7 +873,7 @@ SecCmsSignedDataAddCertChain(SecCmsSignedDataRef sigd, SecCertificateRef cert)
     usage = certUsageEmailSigner;
 
     /* do not include root */
-    certlist = CERT_CertChainFromCert(cert, usage, PR_FALSE);
+    certlist = CERT_CertChainFromCert(cert, usage, PR_FALSE, PR_FALSE);
     if (certlist == NULL)
 	return SECFailure;
 

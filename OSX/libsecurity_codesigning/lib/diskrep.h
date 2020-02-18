@@ -92,6 +92,7 @@ public:
 	virtual size_t pageSize(const SigningContext &ctx);		// default main executable page size [infinite, i.e. no paging]
 
 	virtual void strictValidate(const CodeDirectory* cd, const ToleratedErrors& tolerated, SecCSFlags flags); // perform strict validation
+	virtual void strictValidateStructure(const CodeDirectory* cd, const ToleratedErrors& tolerated, SecCSFlags flags) { }; // perform structural strict validation
 	virtual CFArrayRef allowedResourceOmissions();			// allowed (default) resource omission rules
 
 	virtual bool appleInternalForcePlatform() const {return false;};
@@ -158,6 +159,27 @@ public:
 	static const size_t monolithicPageSize = 0;		// default page size for non-Mach-O executables
 };
 
+/*
+ * Editable Disk Reps allow editing of their existing code signature.
+ * Specifically, they allow for individual components to be replaced,
+ * while preserving all other components.
+ * Lots of restrictions apply, e.g. machO signatures' superblobs may
+ * not change in size, and components covered by the code directory
+ * cannot be replaced without adjusting the code directory.
+ * Replacing or adding CMS blobs (having reserved enough size in the
+ * superblob beforehand) is the original reason this trait exists.
+ */
+class EditableDiskRep {
+public:
+	typedef std::map<CodeDirectory::Slot, CFCopyRef<CFDataRef>> RawComponentMap;
+	
+	/* Return all components in raw form.
+	 * Signature editing will add all the components obtained hereby
+	 * back to their specific slots, though some of them may have
+	 * been replaced in the map.
+	 */
+	virtual RawComponentMap createRawComponents() = 0;
+};
 
 //
 // Write-access objects.
@@ -253,6 +275,7 @@ public:
 	size_t pageSize(const SigningContext &ctx) { return mOriginal->pageSize(ctx); }
 
 	void strictValidate(const CodeDirectory* cd, const ToleratedErrors& tolerated, SecCSFlags flags) { mOriginal->strictValidate(cd, tolerated, flags); }
+	void strictValidateStructure(const CodeDirectory* cd, const ToleratedErrors& tolerated, SecCSFlags flags) { mOriginal->strictValidateStructure(cd, tolerated, flags); }
 	CFArrayRef allowedResourceOmissions() { return mOriginal->allowedResourceOmissions(); }
 
 private:
